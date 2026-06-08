@@ -25,7 +25,10 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
 .search-bar button { padding: 12px 32px; font-size: 16px; background: #4a6cf7; color: #fff; border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
 .search-bar button:hover { background: #3a5ce5; }
 .search-bar button:disabled { background: #a0a0a0; cursor: not-allowed; }
-.summary { padding: 8px 0; color: #555; font-size: 14px; }
+.summary-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.summary { color: #555; font-size: 14px; }
+.toggle-btn { padding: 4px 12px; font-size: 13px; background: #fff; color: #4a6cf7; border: 1px solid #4a6cf7; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.toggle-btn:hover { background: #4a6cf7; color: #fff; }
 .results { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .result-item { padding: 8px 16px; border-bottom: 1px solid #eee; font-family: "Consolas", "Monaco", monospace; font-size: 13px; line-height: 1.6; transition: background 0.15s; }
 .result-item:hover { background: #f0f5ff; }
@@ -54,7 +57,10 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
     <input id="query" type="text" placeholder="输入检索词，支持 AND、OR、NOT 逻辑运算符，例如：client_msg AND 3910 NOT error">
     <button id="searchBtn" onclick="doSearch()">检索</button>
   </div>
-  <div id="summary" class="summary" style="display:none;"></div>
+  <div class="summary-bar" id="summaryBar" style="display:none;">
+    <div id="summary" class="summary"></div>
+    <button id="toggleOrderBtn" class="toggle-btn" onclick="toggleOrder()" style="display:none;">顺序 ⬇</button>
+  </div>
   <div id="results" class="results" style="display:none;">
     <div class="results-scroll" id="resultsScroll"></div>
   </div>
@@ -77,16 +83,54 @@ function highlightTerms(text, terms) {
   return escaped.replace(regex, '<span class="highlight">$1</span>');
 }
 
+var currentResults = [];
+var currentTerms = [];
+var isReversed = localStorage.getItem('isReversed') === 'true';
+
+function renderResults() {
+  var scrollEl = document.getElementById('resultsScroll');
+  var toggleBtn = document.getElementById('toggleOrderBtn');
+  var resultsEl = document.getElementById('results');
+
+  if (currentResults.length === 0) {
+    resultsEl.style.display = 'block';
+    scrollEl.innerHTML = '<div class="no-results">无匹配结果</div>';
+    toggleBtn.style.display = 'none';
+    return;
+  }
+
+  resultsEl.style.display = 'block';
+  toggleBtn.style.display = 'inline-block';
+  toggleBtn.textContent = isReversed ? '逆序 ⬆' : '顺序 ⬇';
+
+  var list = isReversed ? currentResults.slice().reverse() : currentResults;
+  var html = '';
+  list.forEach(function(r) {
+    html += '<div class="result-item"><span class="result-meta">[' + escapeHtml(r.file) + ':' + r.line_number + ']</span>' + highlightTerms(r.content, currentTerms) + '</div>';
+  });
+  scrollEl.innerHTML = html;
+}
+
+function toggleOrder() {
+  isReversed = !isReversed;
+  localStorage.setItem('isReversed', isReversed);
+  renderResults();
+}
+
 function doSearch() {
   var query = document.getElementById('query').value;
   var logPath = document.getElementById('logPath').value;
   var btn = document.getElementById('searchBtn');
+  var summaryBarEl = document.getElementById('summaryBar');
   var summaryEl = document.getElementById('summary');
   var resultsEl = document.getElementById('results');
   var scrollEl = document.getElementById('resultsScroll');
 
   // 保存日志路径到本地缓存
   localStorage.setItem('logPath', logPath);
+
+  currentResults = [];
+  currentTerms = [];
 
   btn.disabled = true;
   btn.textContent = '检索中...';
@@ -101,27 +145,18 @@ function doSearch() {
     return r.json();
   })
   .then(function(data) {
-    summaryEl.style.display = 'block';
+    summaryBarEl.style.display = 'flex';
     summaryEl.textContent = '共找到 ' + data.total + ' 条匹配结果';
-
-    if (data.total === 0) {
-      resultsEl.style.display = 'block';
-      scrollEl.innerHTML = '<div class="no-results">无匹配结果</div>';
-    } else {
-      resultsEl.style.display = 'block';
-      var html = '';
-      var terms = data.terms || [];
-      data.results.forEach(function(r) {
-        html += '<div class="result-item"><span class="result-meta">[' + escapeHtml(r.file) + ':' + r.line_number + ']</span>' + highlightTerms(r.content, terms) + '</div>';
-      });
-      scrollEl.innerHTML = html;
-    }
+    currentResults = data.results || [];
+    currentTerms = data.terms || [];
+    renderResults();
   })
   .catch(function(err) {
-    summaryEl.style.display = 'block';
+    summaryBarEl.style.display = 'flex';
     summaryEl.textContent = '';
     resultsEl.style.display = 'block';
     scrollEl.innerHTML = '<div class="error-msg">检索出错: ' + escapeHtml(err.message) + '</div>';
+    document.getElementById('toggleOrderBtn').style.display = 'none';
   })
   .finally(function() {
     btn.disabled = false;
