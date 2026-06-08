@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日志检索工具</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
+.path-bar { display: flex; gap: 12px; margin-bottom: 12px; }
+.path-bar input { flex: 1; padding: 10px 16px; font-size: 14px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
+.path-bar input:focus { border-color: #4a6cf7; }
+.search-bar { display: flex; gap: 12px; margin-bottom: 20px; }
+.search-bar input { flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
+.search-bar input:focus { border-color: #4a6cf7; }
+.search-bar button { padding: 12px 32px; font-size: 16px; background: #4a6cf7; color: #fff; border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+.search-bar button:hover { background: #3a5ce5; }
+.search-bar button:disabled { background: #a0a0a0; cursor: not-allowed; }
+.summary { padding: 8px 0; color: #555; font-size: 14px; }
+.results { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.result-item { padding: 8px 16px; border-bottom: 1px solid #eee; font-family: "Consolas", "Monaco", monospace; font-size: 13px; line-height: 1.6; transition: background 0.15s; }
+.result-item:hover { background: #f0f5ff; }
+.result-item:last-child { border-bottom: none; }
+.result-meta { color: #4a6cf7; font-weight: bold; margin-right: 8px; }
+.highlight { color: #e74c3c; font-weight: bold; }
+.no-results { text-align: center; padding: 40px; color: #999; font-size: 16px; }
+.error-msg { text-align: center; padding: 20px; color: #e74c3c; font-size: 14px; }
+.results-scroll { max-height: 70vh; overflow-y: auto; }
+@media (max-width: 600px) {
+  .search-bar { flex-direction: column; }
+  .search-bar button { width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>日志检索工具</h1>
+  <div class="path-bar">
+    <input id="logPath" type="text" placeholder="输入日志目录路径，例如：D:\logs 或 /home/user/logs">
+  </div>
+  <div class="search-bar">
+    <input id="query" type="text" placeholder="输入检索词，支持 AND、OR、NOT 逻辑运算符，例如：client_msg AND 3910 NOT error">
+    <button id="searchBtn" onclick="doSearch()">检索</button>
+  </div>
+  <div id="summary" class="summary" style="display:none;"></div>
+  <div id="results" class="results" style="display:none;">
+    <div class="results-scroll" id="resultsScroll"></div>
+  </div>
+</div>
+<script>
+function escapeHtml(text) {
+  var d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function highlightTerms(text, terms) {
+  if (!terms || terms.length === 0) return escapeHtml(text);
+  var escaped = escapeHtml(text);
+  var parts = [];
+  terms.forEach(function(t) {
+    parts.push(escapeHtml(t));
+  });
+  var regex = new RegExp('(' + parts.map(function(p) { return p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|') + ')', 'gi');
+  return escaped.replace(regex, '<span class="highlight">$1</span>');
+}
+
+function doSearch() {
+  var query = document.getElementById('query').value;
+  var logPath = document.getElementById('logPath').value;
+  var btn = document.getElementById('searchBtn');
+  var summaryEl = document.getElementById('summary');
+  var resultsEl = document.getElementById('results');
+  var scrollEl = document.getElementById('resultsScroll');
+
+  btn.disabled = true;
+  btn.textContent = '检索中...';
+
+  fetch('/api/search', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query: query, path: logPath})
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('请求失败: ' + r.status);
+    return r.json();
+  })
+  .then(function(data) {
+    summaryEl.style.display = 'block';
+    summaryEl.textContent = '共找到 ' + data.total + ' 条匹配结果';
+
+    if (data.total === 0) {
+      resultsEl.style.display = 'block';
+      scrollEl.innerHTML = '<div class="no-results">无匹配结果</div>';
+    } else {
+      resultsEl.style.display = 'block';
+      var html = '';
+      var terms = data.terms || [];
+      data.results.forEach(function(r) {
+        html += '<div class="result-item"><span class="result-meta">[' + escapeHtml(r.file) + ':' + r.line_number + ']</span>' + highlightTerms(r.content, terms) + '</div>';
+      });
+      scrollEl.innerHTML = html;
+    }
+  })
+  .catch(function(err) {
+    summaryEl.style.display = 'block';
+    summaryEl.textContent = '';
+    resultsEl.style.display = 'block';
+    scrollEl.innerHTML = '<div class="error-msg">检索出错: ' + escapeHtml(err.message) + '</div>';
+  })
+  .finally(function() {
+    btn.disabled = false;
+    btn.textContent = '检索';
+  });
+}
+
+document.getElementById('query').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>
