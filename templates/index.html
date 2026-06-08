@@ -20,8 +20,12 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
 .path-suggestion-item .name { flex: 1; }
 .path-suggestion-item .type { color: #999; font-size: 12px; }
 .search-bar { display: flex; gap: 12px; margin-bottom: 20px; }
-.search-bar input { flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
+.query-input-wrapper { flex: 1; position: relative; }
+.search-bar input { width: 100%; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
 .search-bar input:focus { border-color: #4a6cf7; }
+.search-history { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-height: 300px; overflow-y: auto; z-index: 100; display: none; }
+.search-history-item { padding: 10px 16px; cursor: pointer; font-size: 14px; color: #333; }
+.search-history-item:hover, .search-history-item.active { background: #f0f5ff; }
 .search-bar button { padding: 12px 32px; font-size: 16px; background: #4a6cf7; color: #fff; border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
 .search-bar button:hover { background: #3a5ce5; }
 .search-bar button:disabled { background: #a0a0a0; cursor: not-allowed; }
@@ -54,7 +58,10 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
     </div>
   </div>
   <div class="search-bar">
-    <input id="query" type="text" placeholder="输入检索词，支持 AND、OR、NOT 逻辑运算符，例如：client_msg AND 3910 NOT error">
+    <div class="query-input-wrapper">
+      <input id="query" type="text" placeholder="输入检索词，支持 AND、OR、NOT 逻辑运算符，例如：client_msg AND 3910 NOT error" autocomplete="off">
+      <div id="searchHistory" class="search-history"></div>
+    </div>
     <button id="searchBtn" onclick="doSearch()">检索</button>
   </div>
   <div class="summary-bar" id="summaryBar" style="display:none;">
@@ -117,6 +124,70 @@ function toggleOrder() {
   renderResults();
 }
 
+function saveSearchHistory(query) {
+  query = query.trim();
+  if (!query) return;
+  var history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+  var idx = history.indexOf(query);
+  if (idx >= 0) history.splice(idx, 1);
+  history.unshift(query);
+  if (history.length > 20) history = history.slice(0, 20);
+  localStorage.setItem('searchHistory', JSON.stringify(history));
+}
+
+function showSearchHistory() {
+  var queryInput = document.getElementById('query');
+  var historyBox = document.getElementById('searchHistory');
+  if (queryInput.value.trim() !== '') {
+    historyBox.style.display = 'none';
+    return;
+  }
+  var history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+  if (history.length === 0) {
+    historyBox.style.display = 'none';
+    return;
+  }
+  var html = '';
+  history.forEach(function(item, idx) {
+    html += '<div class="search-history-item" data-index="' + idx + '">' + escapeHtml(item) + '</div>';
+  });
+  historyBox.innerHTML = html;
+  historyBox.style.display = 'block';
+
+  historyBox.querySelectorAll('.search-history-item').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var idx = parseInt(this.getAttribute('data-index'));
+      selectHistoryItem(idx);
+    });
+    el.addEventListener('mouseenter', function() {
+      activeHistoryIndex = parseInt(this.getAttribute('data-index'));
+      updateHistoryActiveClass();
+    });
+  });
+}
+
+function selectHistoryItem(idx) {
+  var history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+  if (idx < 0 || idx >= history.length) return;
+  document.getElementById('query').value = history[idx];
+  document.getElementById('searchHistory').style.display = 'none';
+  doSearch();
+}
+
+function updateHistoryActiveClass() {
+  var historyBox = document.getElementById('searchHistory');
+  var els = historyBox.querySelectorAll('.search-history-item');
+  els.forEach(function(el, idx) {
+    if (idx === activeHistoryIndex) {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
+}
+
+var activeHistoryIndex = -1;
+
 function doSearch() {
   var query = document.getElementById('query').value;
   var logPath = document.getElementById('logPath').value;
@@ -126,8 +197,10 @@ function doSearch() {
   var resultsEl = document.getElementById('results');
   var scrollEl = document.getElementById('resultsScroll');
 
-  // 保存日志路径到本地缓存
+  // 保存日志路径和检索词到本地缓存
   localStorage.setItem('logPath', logPath);
+  saveSearchHistory(query);
+  document.getElementById('searchHistory').style.display = 'none';
 
   currentResults = [];
   currentTerms = [];
@@ -164,9 +237,56 @@ function doSearch() {
   });
 }
 
-document.getElementById('query').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') doSearch();
-});
+(function() {
+  var queryInput = document.getElementById('query');
+  var historyBox = document.getElementById('searchHistory');
+
+  queryInput.addEventListener('focus', function() {
+    showSearchHistory();
+  });
+
+  queryInput.addEventListener('input', function() {
+    if (this.value.trim() === '') {
+      showSearchHistory();
+    } else {
+      historyBox.style.display = 'none';
+    }
+  });
+
+  queryInput.addEventListener('keydown', function(e) {
+    if (historyBox.style.display === 'block') {
+      var history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeHistoryIndex = (activeHistoryIndex + 1) % history.length;
+        updateHistoryActiveClass();
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeHistoryIndex = (activeHistoryIndex - 1 + history.length) % history.length;
+        updateHistoryActiveClass();
+        return;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeHistoryIndex >= 0) {
+          selectHistoryItem(activeHistoryIndex);
+          return;
+        }
+      } else if (e.key === 'Escape') {
+        historyBox.style.display = 'none';
+        return;
+      }
+    }
+    if (e.key === 'Enter') doSearch();
+  });
+
+  // 点击外部关闭历史下拉
+  document.addEventListener('click', function(e) {
+    if (!queryInput.contains(e.target) && !historyBox.contains(e.target)) {
+      historyBox.style.display = 'none';
+    }
+  });
+})();
 
 // 页面加载时从 localStorage 恢复日志路径
 (function() {
