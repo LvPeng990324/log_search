@@ -41,7 +41,10 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
 .highlight { color: #e74c3c; font-weight: bold; }
 .no-results { text-align: center; padding: 40px; color: #999; font-size: 16px; }
 .error-msg { text-align: center; padding: 20px; color: #e74c3c; font-size: 14px; }
-.results-scroll { max-height: 70vh; overflow-y: auto; }
+.results-scroll { }
+.load-all-bar { text-align: center; padding: 12px; border-top: 1px solid #eee; }
+.load-all-btn { padding: 8px 24px; font-size: 14px; background: #fff; color: #4a6cf7; border: 1px solid #4a6cf7; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.load-all-btn:hover { background: #4a6cf7; color: #fff; }
 @media (max-width: 600px) {
   .search-bar { flex-direction: column; }
   .search-bar button { width: 100%; }
@@ -70,6 +73,9 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
   </div>
   <div id="results" class="results" style="display:none;">
     <div class="results-scroll" id="resultsScroll"></div>
+    <div class="load-all-bar" id="loadAllBar" style="display:none;">
+      <button class="load-all-btn" onclick="loadAll()">加载所有</button>
+    </div>
   </div>
 </div>
 <script>
@@ -93,16 +99,19 @@ function highlightTerms(text, terms) {
 var currentResults = [];
 var currentTerms = [];
 var isReversed = localStorage.getItem('isReversed') === 'true';
+var showAll = false;
 
 function renderResults() {
   var scrollEl = document.getElementById('resultsScroll');
   var toggleBtn = document.getElementById('toggleOrderBtn');
   var resultsEl = document.getElementById('results');
+  var loadAllBar = document.getElementById('loadAllBar');
 
   if (currentResults.length === 0) {
     resultsEl.style.display = 'block';
     scrollEl.innerHTML = '<div class="no-results">无匹配结果</div>';
     toggleBtn.style.display = 'none';
+    loadAllBar.style.display = 'none';
     return;
   }
 
@@ -111,11 +120,24 @@ function renderResults() {
   toggleBtn.textContent = isReversed ? '逆序 ⬆' : '顺序 ⬇';
 
   var list = isReversed ? currentResults.slice().reverse() : currentResults;
+  var displayList = showAll ? list : list.slice(0, 100);
+
   var html = '';
-  list.forEach(function(r) {
+  displayList.forEach(function(r) {
     html += '<div class="result-item"><span class="result-meta">[' + escapeHtml(r.file) + ':' + r.line_number + ']</span>' + highlightTerms(r.content, currentTerms) + '</div>';
   });
   scrollEl.innerHTML = html;
+
+  if (currentResults.length > 100 && !showAll) {
+    loadAllBar.style.display = 'block';
+  } else {
+    loadAllBar.style.display = 'none';
+  }
+}
+
+function loadAll() {
+  showAll = true;
+  renderResults();
 }
 
 function toggleOrder() {
@@ -202,6 +224,7 @@ function doSearch() {
   saveSearchHistory(query);
   document.getElementById('searchHistory').style.display = 'none';
 
+  showAll = false;
   currentResults = [];
   currentTerms = [];
 
