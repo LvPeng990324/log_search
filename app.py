@@ -102,5 +102,27 @@ def search():
     return jsonify({"results": results, "total": len(results), "terms": highlight_terms})
 
 
+@app.route("/api/list_dir", methods=["POST"])
+def list_dir():
+    data = request.get_json()
+    path = data.get("path", "") if data else ""
+
+    if not path or not os.path.isdir(path):
+        return jsonify({"items": []})
+
+    try:
+        items = []
+        for entry in os.scandir(path):
+            items.append({
+                "name": entry.name,
+                "is_dir": entry.is_dir()
+            })
+        # 目录在前，文件在后，按名称排序
+        items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+        return jsonify({"items": items})
+    except Exception:
+        return jsonify({"items": []})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

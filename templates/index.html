@@ -10,8 +10,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
 h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
 .path-bar { display: flex; gap: 12px; margin-bottom: 12px; }
-.path-bar input { flex: 1; padding: 10px 16px; font-size: 14px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
+.path-input-wrapper { flex: 1; position: relative; }
+.path-bar input { width: 100%; padding: 10px 16px; font-size: 14px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
 .path-bar input:focus { border-color: #4a6cf7; }
+.path-suggestions { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-height: 300px; overflow-y: auto; z-index: 100; display: none; }
+.path-suggestion-item { padding: 10px 16px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.path-suggestion-item:hover, .path-suggestion-item.active { background: #f0f5ff; }
+.path-suggestion-item .icon { width: 20px; text-align: center; color: #666; font-size: 16px; }
+.path-suggestion-item .name { flex: 1; }
+.path-suggestion-item .type { color: #999; font-size: 12px; }
 .search-bar { display: flex; gap: 12px; margin-bottom: 20px; }
 .search-bar input { flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
 .search-bar input:focus { border-color: #4a6cf7; }
@@ -38,7 +45,10 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
 <div class="container">
   <h1>日志检索工具</h1>
   <div class="path-bar">
-    <input id="logPath" type="text" placeholder="输入日志目录路径，例如：D:\logs 或 /home/user/logs">
+    <div class="path-input-wrapper">
+      <input id="logPath" type="text" placeholder="输入日志目录路径，例如：D:\logs 或 /home/user/logs" autocomplete="off">
+      <div id="pathSuggestions" class="path-suggestions"></div>
+    </div>
   </div>
   <div class="search-bar">
     <input id="query" type="text" placeholder="输入检索词，支持 AND、OR、NOT 逻辑运算符，例如：client_msg AND 3910 NOT error">
@@ -74,6 +84,9 @@ function doSearch() {
   var summaryEl = document.getElementById('summary');
   var resultsEl = document.getElementById('results');
   var scrollEl = document.getElementById('resultsScroll');
+
+  // 保存日志路径到本地缓存
+  localStorage.setItem('logPath', logPath);
 
   btn.disabled = true;
   btn.textContent = '检索中...';
@@ -119,6 +132,154 @@ function doSearch() {
 document.getElementById('query').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') doSearch();
 });
+
+// 页面加载时从 localStorage 恢复日志路径
+(function() {
+  var savedPath = localStorage.getItem('logPath');
+  if (savedPath) {
+    document.getElementById('logPath').value = savedPath;
+  }
+})();
+
+// ========== 路径自动补全 ==========
+(function() {
+  var pathInput = document.getElementById('logPath');
+  var suggestionsBox = document.getElementById('pathSuggestions');
+  var debounceTimer = null;
+  var activeIndex = -1;
+  var currentItems = [];
+
+  function joinPath(base, name) {
+    if (!base) return name;
+    // Windows 路径处理
+    if (base.indexOf('\\') >= 0 || /^[a-zA-Z]:/.test(base)) {
+      if (base.slice(-1) === '\\') return base + name;
+      return base + '\\' + name;
+    }
+    // Unix 路径处理
+    if (base.slice(-1) === '/') return base + name;
+    return base + '/' + name;
+  }
+
+  function renderSuggestions(items) {
+    currentItems = items;
+    activeIndex = -1;
+    if (!items || items.length === 0) {
+      suggestionsBox.style.display = 'none';
+      suggestionsBox.innerHTML = '';
+      return;
+    }
+    var html = '';
+    items.forEach(function(item, idx) {
+      var icon = item.is_dir ? '📁' : '📄';
+      var typeLabel = item.is_dir ? '目录' : '文件';
+      html += '<div class="path-suggestion-item" data-index="' + idx + '">' +
+        '<span class="icon">' + icon + '</span>' +
+        '<span class="name">' + escapeHtml(item.name) + '</span>' +
+        '<span class="type">' + typeLabel + '</span>' +
+        '</div>';
+    });
+    suggestionsBox.innerHTML = html;
+    suggestionsBox.style.display = 'block';
+
+    // 绑定点击事件
+    suggestionsBox.querySelectorAll('.path-suggestion-item').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var idx = parseInt(this.getAttribute('data-index'));
+        selectItem(idx);
+      });
+      el.addEventListener('mouseenter', function() {
+        activeIndex = parseInt(this.getAttribute('data-index'));
+        updateActiveClass();
+      });
+    });
+  }
+
+  function updateActiveClass() {
+    var els = suggestionsBox.querySelectorAll('.path-suggestion-item');
+    els.forEach(function(el, idx) {
+      if (idx === activeIndex) {
+        el.classList.add('active');
+      } else {
+        el.classList.remove('active');
+      }
+    });
+  }
+
+  function selectItem(idx) {
+    if (idx < 0 || idx >= currentItems.length) return;
+    var item = currentItems[idx];
+    var currentPath = pathInput.value.trim();
+    var newPath = joinPath(currentPath, item.name);
+    pathInput.value = newPath;
+    suggestionsBox.style.display = 'none';
+    pathInput.focus();
+    // 如果是目录，继续列出该目录下的内容
+    if (item.is_dir) {
+      fetchSuggestions(newPath);
+    }
+  }
+
+  function fetchSuggestions(path) {
+    if (!path) {
+      suggestionsBox.style.display = 'none';
+      return;
+    }
+    fetch('/api/list_dir', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: path})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      renderSuggestions(data.items || []);
+    })
+    .catch(function() {
+      suggestionsBox.style.display = 'none';
+    });
+  }
+
+  pathInput.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    var val = pathInput.value.trim();
+    if (!val) {
+      suggestionsBox.style.display = 'none';
+      return;
+    }
+    debounceTimer = setTimeout(function() {
+      fetchSuggestions(val);
+    }, 200);
+  });
+
+  pathInput.addEventListener('keydown', function(e) {
+    if (suggestionsBox.style.display === 'none') return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIndex = (activeIndex + 1) % currentItems.length;
+      updateActiveClass();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = (activeIndex - 1 + currentItems.length) % currentItems.length;
+      updateActiveClass();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0) {
+        selectItem(activeIndex);
+      } else if (currentItems.length > 0) {
+        selectItem(0);
+      }
+    } else if (e.key === 'Escape') {
+      suggestionsBox.style.display = 'none';
+    }
+  });
+
+  // 点击外部关闭下拉
+  document.addEventListener('click', function(e) {
+    if (!pathInput.contains(e.target) && !suggestionsBox.contains(e.target)) {
+      suggestionsBox.style.display = 'none';
+    }
+  });
+})();
 </script>
 </body>
 </html>
