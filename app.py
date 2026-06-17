@@ -60,7 +60,7 @@ def line_matches(line, include_terms, or_terms, exclude_terms):
     return True
 
 
-def search_files(query, log_dirs):
+def search_files(query, log_dirs, start_time=None, end_time=None):
     include_terms, or_terms, exclude_terms = parse_query(query)
     results = []
 
@@ -75,6 +75,18 @@ def search_files(query, log_dirs):
             filepath = os.path.join(log_dir, filename)
             if not os.path.isfile(filepath):
                 continue
+
+            # 按文件最后修改时间过滤
+            if start_time is not None or end_time is not None:
+                try:
+                    mtime_ms = os.path.getmtime(filepath) * 1000
+                    if start_time is not None and mtime_ms < start_time:
+                        continue
+                    if end_time is not None and mtime_ms > end_time:
+                        continue
+                except Exception:
+                    continue
+
             try:
                 with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     for line_number, line in enumerate(f, start=1):
@@ -101,8 +113,19 @@ def search():
     data = request.get_json()
     query = data.get("query", "") if data else ""
     paths = data.get("paths", []) if data else []
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
+    try:
+        start_time = int(start_time) if start_time is not None else None
+    except (ValueError, TypeError):
+        start_time = None
+    try:
+        end_time = int(end_time) if end_time is not None else None
+    except (ValueError, TypeError):
+        end_time = None
+
     include_terms, or_terms, exclude_terms = parse_query(query)
-    results = search_files(query, paths)
+    results = search_files(query, paths, start_time=start_time, end_time=end_time)
     highlight_terms = list(set(include_terms + or_terms))
     return jsonify({"results": results, "total": len(results), "terms": highlight_terms})
 

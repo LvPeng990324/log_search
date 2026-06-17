@@ -20,6 +20,16 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
 .path-actions { display: flex; gap: 8px; }
 .add-path-btn { padding: 8px 16px; font-size: 14px; background: #fff; color: #4a6cf7; border: 1px solid #4a6cf7; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
 .add-path-btn:hover { background: #4a6cf7; color: #fff; }
+.filter-section { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+.filter-section-title { font-size: 14px; color: #555; margin-bottom: 10px; font-weight: 500; }
+.time-filter { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.time-field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+.time-field label { font-size: 12px; color: #666; }
+.time-field input { width: 100%; padding: 8px 12px; font-size: 14px; border: 2px solid #ddd; border-radius: 6px; outline: none; transition: border-color 0.2s; }
+.time-field input:focus { border-color: #4a6cf7; }
+.quick-time-btns { display: flex; gap: 8px; }
+.quick-time-btn { padding: 8px 14px; font-size: 13px; background: #f0f5ff; color: #4a6cf7; border: 1px solid #4a6cf7; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.quick-time-btn:hover { background: #4a6cf7; color: #fff; }
 .path-suggestions { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-height: 300px; overflow-y: auto; z-index: 100; display: none; }
 .path-suggestion-item { padding: 10px 16px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .path-suggestion-item:hover, .path-suggestion-item.active { background: #f0f5ff; }
@@ -67,6 +77,22 @@ h1 { text-align: center; color: #1a1a2e; margin-bottom: 24px; font-size: 28px; }
     <div id="pathList" class="path-list"></div>
     <div class="path-actions">
       <button class="add-path-btn" onclick="addPathRow()">+ 添加目录</button>
+    </div>
+  </div>
+  <div class="filter-section">
+    <div class="filter-section-title">过滤日志文件修改时间</div>
+    <div class="time-filter">
+      <div class="time-field">
+        <label for="startTime">起始时间</label>
+        <input id="startTime" type="datetime-local" step="1">
+      </div>
+      <div class="time-field">
+        <label for="endTime">终止时间</label>
+        <input id="endTime" type="datetime-local" step="1">
+      </div>
+      <div class="quick-time-btns">
+        <button class="quick-time-btn" onclick="setToday()">今天</button>
+      </div>
     </div>
   </div>
   <div class="search-bar">
@@ -152,6 +178,45 @@ function renderResults() {
 function loadAll() {
   showAll = true;
   renderResults();
+}
+
+function padTime(n) {
+  return n < 10 ? '0' + n : n;
+}
+
+function formatDateTimeLocal(date) {
+  return date.getFullYear() + '-' + padTime(date.getMonth() + 1) + '-' + padTime(date.getDate()) + 'T' +
+    padTime(date.getHours()) + ':' + padTime(date.getMinutes()) + ':' + padTime(date.getSeconds());
+}
+
+function parseTimeValue(value) {
+  if (!value) return null;
+  // datetime-local 可能只到分钟，补齐秒
+  if (value.length === 16) value += ':00';
+  var d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.getTime();
+}
+
+function setToday() {
+  var now = new Date();
+  var start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  var end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  document.getElementById('startTime').value = formatDateTimeLocal(start);
+  document.getElementById('endTime').value = formatDateTimeLocal(end);
+  saveTimeFilter();
+}
+
+function saveTimeFilter() {
+  localStorage.setItem('startTime', document.getElementById('startTime').value);
+  localStorage.setItem('endTime', document.getElementById('endTime').value);
+}
+
+function restoreTimeFilter() {
+  var start = localStorage.getItem('startTime') || '';
+  var end = localStorage.getItem('endTime') || '';
+  document.getElementById('startTime').value = start;
+  document.getElementById('endTime').value = end;
 }
 
 function toggleOrder() {
@@ -327,14 +392,17 @@ function renderPathRows(paths) {
 function doSearch() {
   var query = document.getElementById('query').value;
   var paths = collectPaths();
+  var startTime = parseTimeValue(document.getElementById('startTime').value);
+  var endTime = parseTimeValue(document.getElementById('endTime').value);
   var btn = document.getElementById('searchBtn');
   var summaryBarEl = document.getElementById('summaryBar');
   var summaryEl = document.getElementById('summary');
   var resultsEl = document.getElementById('results');
   var scrollEl = document.getElementById('resultsScroll');
 
-  // 保存日志路径和检索词到本地缓存
+  // 保存日志路径、时间过滤和检索词到本地缓存
   persistCurrentPaths();
+  saveTimeFilter();
   localStorage.setItem('query', query);
   saveSearchHistory(query);
   document.getElementById('searchHistory').style.display = 'none';
@@ -349,7 +417,7 @@ function doSearch() {
   fetch('/api/search', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({query: query, paths: paths})
+    body: JSON.stringify({query: query, paths: paths, start_time: startTime, end_time: endTime})
   })
   .then(function(r) {
     if (!r.ok) throw new Error('请求失败: ' + r.status);
@@ -436,6 +504,10 @@ function doSearch() {
 
   var savedQuery = localStorage.getItem('query') || '';
   document.getElementById('query').value = savedQuery;
+
+  restoreTimeFilter();
+  document.getElementById('startTime').addEventListener('input', saveTimeFilter);
+  document.getElementById('endTime').addEventListener('input', saveTimeFilter);
 })();
 
 // ========== 路径自动补全 ==========
