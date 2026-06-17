@@ -60,28 +60,33 @@ def line_matches(line, include_terms, or_terms, exclude_terms):
     return True
 
 
-def search_files(query, log_dir):
+def search_files(query, log_dirs):
     include_terms, or_terms, exclude_terms = parse_query(query)
     results = []
 
-    if not log_dir or not os.path.isdir(log_dir):
-        return results
+    if isinstance(log_dirs, str):
+        log_dirs = [log_dirs]
 
-    for filename in os.listdir(log_dir):
-        filepath = os.path.join(log_dir, filename)
-        if not os.path.isfile(filepath):
+    for log_dir in log_dirs:
+        if not log_dir or not os.path.isdir(log_dir):
             continue
-        try:
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                for line_number, line in enumerate(f, start=1):
-                    if line_matches(line, include_terms, or_terms, exclude_terms):
-                        results.append({
-                            "file": filename,
-                            "line_number": line_number,
-                            "content": line.rstrip("\n")
-                        })
-        except Exception:
-            continue
+
+        for filename in os.listdir(log_dir):
+            filepath = os.path.join(log_dir, filename)
+            if not os.path.isfile(filepath):
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                    for line_number, line in enumerate(f, start=1):
+                        if line_matches(line, include_terms, or_terms, exclude_terms):
+                            results.append({
+                                "dir": log_dir,
+                                "file": filename,
+                                "line_number": line_number,
+                                "content": line.rstrip("\n")
+                            })
+            except Exception:
+                continue
 
     return results
 
@@ -95,9 +100,9 @@ def index():
 def search():
     data = request.get_json()
     query = data.get("query", "") if data else ""
-    log_dir = data.get("path", "") if data else ""
+    paths = data.get("paths", []) if data else []
     include_terms, or_terms, exclude_terms = parse_query(query)
-    results = search_files(query, log_dir)
+    results = search_files(query, paths)
     highlight_terms = list(set(include_terms + or_terms))
     return jsonify({"results": results, "total": len(results), "terms": highlight_terms})
 
