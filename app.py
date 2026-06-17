@@ -4,12 +4,35 @@ from flask import Flask, render_template, request, jsonify
 app = Flask(__name__)
 
 
+def tokenize_query(query):
+    """按空格分词，双引号内的内容作为一个整体 token。"""
+    tokens = []
+    i = 0
+    n = len(query)
+    while i < n:
+        if query[i] == '"':
+            j = i + 1
+            while j < n and query[j] != '"':
+                j += 1
+            tokens.append(query[i + 1:j])
+            i = j + 1
+        elif query[i].isspace():
+            i += 1
+        else:
+            j = i
+            while j < n and not query[j].isspace():
+                j += 1
+            tokens.append(query[i:j])
+            i = j
+    return tokens
+
+
 def parse_query(query):
     include_terms = []
     or_terms = []
     exclude_terms = []
 
-    tokens = query.split()
+    tokens = tokenize_query(query)
     if not tokens:
         return include_terms, or_terms, exclude_terms
 
