@@ -516,16 +516,47 @@ function initPathAutocomplete(pathInput, suggestionsBox) {
   var activeIndex = -1;
   var currentItems = [];
 
-  function joinPath(base, name) {
-    if (!base) return name;
-    // Windows 路径处理
-    if (base.indexOf('\\') >= 0 || /^[a-zA-Z]:/.test(base)) {
-      if (base.slice(-1) === '\\') return base + name;
-      return base + '\\' + name;
+  function detectSep(base) {
+    if (base.indexOf('\\') >= 0) return '\\';
+    if (base.indexOf('/') >= 0) return '/';
+    if (/^[a-zA-Z]:/.test(base)) return '\\';
+    return '/';
+  }
+
+  function splitPath(path) {
+    // Windows 路径处理：C:\ 或 C:/ 开头
+    if (/^[a-zA-Z]:[\\/]/.test(path)) {
+      var lastSep = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+      return {
+        base: path.substring(0, lastSep + 1),
+        filter: path.substring(lastSep + 1)
+      };
     }
     // Unix 路径处理
-    if (base.slice(-1) === '/') return base + name;
-    return base + '/' + name;
+    var lastSep = path.lastIndexOf('/');
+    if (lastSep === -1) {
+      return { base: '', filter: path };
+    }
+    return {
+      base: path.substring(0, lastSep + 1),
+      filter: path.substring(lastSep + 1)
+    };
+  }
+
+  function joinPath(base, name, isDir) {
+    if (!base) {
+      return name + (isDir ? '/' : '');
+    }
+    var sep = detectSep(base);
+    var result = base;
+    if (base.slice(-1) !== '\\' && base.slice(-1) !== '/') {
+      result += sep;
+    }
+    result += name;
+    if (isDir) {
+      result += sep;
+    }
+    return result;
   }
 
   function renderSuggestions(items) {
@@ -576,8 +607,8 @@ function initPathAutocomplete(pathInput, suggestionsBox) {
   function selectItem(idx) {
     if (idx < 0 || idx >= currentItems.length) return;
     var item = currentItems[idx];
-    var currentPath = pathInput.value.trim();
-    var newPath = joinPath(currentPath, item.name);
+    var parts = splitPath(pathInput.value.trim());
+    var newPath = joinPath(parts.base, item.name, item.is_dir);
     pathInput.value = newPath;
     suggestionsBox.style.display = 'none';
     pathInput.focus();
@@ -593,14 +624,27 @@ function initPathAutocomplete(pathInput, suggestionsBox) {
       suggestionsBox.style.display = 'none';
       return;
     }
+    var parts = splitPath(path);
+    if (!parts.base && parts.filter) {
+      // 没有目录部分，无法补全
+      suggestionsBox.style.display = 'none';
+      return;
+    }
     fetch('/api/list_dir', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({path: path})
+      body: JSON.stringify({path: parts.base})
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      renderSuggestions(data.items || []);
+      var items = data.items || [];
+      if (parts.filter) {
+        var lowerFilter = parts.filter.toLowerCase();
+        items = items.filter(function(item) {
+          return item.name.toLowerCase().indexOf(lowerFilter) >= 0;
+        });
+      }
+      renderSuggestions(items);
     })
     .catch(function() {
       suggestionsBox.style.display = 'none';
