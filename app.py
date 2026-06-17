@@ -83,6 +83,42 @@ def line_matches(line, include_terms, or_terms, exclude_terms):
     return True
 
 
+def _match_time(filepath, start_time, end_time):
+    if start_time is None and end_time is None:
+        return True
+    try:
+        mtime_ms = os.path.getmtime(filepath) * 1000
+        if start_time is not None and mtime_ms < start_time:
+            return False
+        if end_time is not None and mtime_ms > end_time:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _search_single_file(filepath, include_terms, or_terms, exclude_terms, start_time, end_time, dir_name):
+    if not os.path.isfile(filepath):
+        return []
+    if not _match_time(filepath, start_time, end_time):
+        return []
+
+    results = []
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            for line_number, line in enumerate(f, start=1):
+                if line_matches(line, include_terms, or_terms, exclude_terms):
+                    results.append({
+                        "dir": dir_name,
+                        "file": os.path.basename(filepath),
+                        "line_number": line_number,
+                        "content": line.rstrip("\n")
+                    })
+    except Exception:
+        pass
+    return results
+
+
 def search_files(query, log_dirs, start_time=None, end_time=None):
     include_terms, or_terms, exclude_terms = parse_query(query)
     results = []
@@ -91,37 +127,26 @@ def search_files(query, log_dirs, start_time=None, end_time=None):
         log_dirs = [log_dirs]
 
     for log_dir in log_dirs:
-        if not log_dir or not os.path.isdir(log_dir):
+        if not log_dir:
+            continue
+
+        # 如果路径指向具体文件，则直接检索该文件
+        if os.path.isfile(log_dir):
+            results.extend(_search_single_file(
+                log_dir, include_terms, or_terms, exclude_terms,
+                start_time, end_time, os.path.dirname(log_dir)
+            ))
+            continue
+
+        if not os.path.isdir(log_dir):
             continue
 
         for filename in os.listdir(log_dir):
             filepath = os.path.join(log_dir, filename)
-            if not os.path.isfile(filepath):
-                continue
-
-            # 按文件最后修改时间过滤
-            if start_time is not None or end_time is not None:
-                try:
-                    mtime_ms = os.path.getmtime(filepath) * 1000
-                    if start_time is not None and mtime_ms < start_time:
-                        continue
-                    if end_time is not None and mtime_ms > end_time:
-                        continue
-                except Exception:
-                    continue
-
-            try:
-                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                    for line_number, line in enumerate(f, start=1):
-                        if line_matches(line, include_terms, or_terms, exclude_terms):
-                            results.append({
-                                "dir": log_dir,
-                                "file": filename,
-                                "line_number": line_number,
-                                "content": line.rstrip("\n")
-                            })
-            except Exception:
-                continue
+            results.extend(_search_single_file(
+                filepath, include_terms, or_terms, exclude_terms,
+                start_time, end_time, log_dir
+            ))
 
     return results
 
